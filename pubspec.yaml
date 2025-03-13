@@ -1,0 +1,16 @@
+name: html_slicer
+description: >
+  A Dart/Flutter plugin that truncates HTML while preserving valid structure
+  and certain specified tags.
+version: 0.1.0
+homepage: https://github.com/NeuralMobile/html_slicer
+repository: https://github.com/NeuralMobile/html_slicer
+issue_tracker: https://github.com/NeuralMobile/html_slicer/issues
+
+environment:
+  sdk: ^3.5.0
+
+dev_dependencies:
+  mocktail: ^1.0.4
+  test: ^1.25.8
+  very_good_analysis: ^6.0.0
