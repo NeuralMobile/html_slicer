@@ -94,6 +94,8 @@ HTML strings while preserving their structure.
 String sliceHtml(String html,
     int maxLength, {
       bool preserveNewlines = true,
+      Set<String> preserveTags = defaultPreserveTags,
+      String ellipsis = '...',
     });
 ```
 
@@ -105,6 +107,9 @@ String sliceHtml(String html,
 - **`preserveNewlines`**: If `true`, newline characters in the input HTML are
   preserved in the output. If `false`, newline characters are replaced with
   spaces.
+- **`preserveTags`**: A set of tag names whose full blocks are preserved
+  without counting their inner content toward `maxLength`.
+- **`ellipsis`**: The string appended only when visible content is truncated.
 
 ### **Returns**
 

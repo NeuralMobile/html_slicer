@@ -3,7 +3,11 @@ import 'package:test/test.dart';
 
 /// Tests for the [sliceHtml] function, including scenarios with malformed HTML.
 void main() {
-  group('truncateHtml tests', () {
+  group('sliceHtml tests', () {
+    // -----------------------------------------------
+    // Original tests (preserved)
+    // -----------------------------------------------
+
     test('No truncation needed, short text', () {
       const input = '<p>Hello world!</p>';
       final result = sliceHtml(input, 50);
@@ -116,7 +120,7 @@ World</p>''';
 <p>Follo...</p>'''
               .trim(),
         ),
-        reason: 'Entire <video> block is preserved and doesn’t count toward '
+        reason: "Entire <video> block is preserved and doesn't count toward "
             'visible text limit.',
       );
     });
@@ -162,7 +166,7 @@ of text</p>
     test('Preserve newlines', () {
       const input = '<p>Hello\nWorld</p>';
       final result = sliceHtml(input, 10);
-      expect(result, '<p>Hello\nWorld...</p>');
+      expect(result, '<p>Hello\nWorld</p>');
     });
 
     test('Remove/ignore newlines', () {
@@ -171,15 +175,11 @@ of text</p>
       expect(result, '<p>This is a paragraph w...</p>');
     });
 
-    // ---------------------------------------
-    // Malformed / invalid HTML tests
-    // ---------------------------------------
+    // -----------------------------------------------
+    // Malformed / invalid HTML tests (preserved)
+    // -----------------------------------------------
 
     test('Missing closing tag for <p>', () {
-      // The HTML has an opening <p> but no corresponding </p>.
-      // The function should still produce valid HTML by closing the tag
-      // at the end,
-      // appending '</p>' automatically. Visible text is only 12 chars: "Hello World!"
       const input = '<p>Hello World!';
       final result = sliceHtml(input, 50);
       expect(
@@ -190,22 +190,353 @@ of text</p>
     });
 
     test('Extra closing tag with no matching open tag', () {
-      // The HTML has an extra </div> that does not match anything on the stack.
-      // The library should just copy the unmatched closing tag as-is,
-      // without popping anything from the stack, then close any unclosed tags
-      // at the end.
       const input = '<p>Hello</p></div>';
       final result = sliceHtml(input, 50);
-      // The <p> gets closed properly, then we see </div> which doesn't match the top of the stack.
-      // So we just output it.
-      // The final output is '<p>Hello</p></div>'
-      // plus no leftover unclosed tags.
       expect(
         result,
         equals('<p>Hello</p></div>'),
         reason:
-            'Unmatched </div> is copied verbatim, no duplication or mis-pop from the stack.',
+            'Unmatched </div> is copied verbatim, no duplication or mis-pop '
+            'from the stack.',
       );
+    });
+
+    // -----------------------------------------------
+    // Bug fix: HTML entities (Bug #1)
+    // -----------------------------------------------
+
+    group('HTML entity handling', () {
+      test('Named entity counts as one visible character', () {
+        expect(
+          sliceHtml('AB&amp;CD', 3),
+          equals('AB&amp;...'),
+          reason: '&amp; is 1 visible char, so A(1) B(2) &amp;(3) then '
+              'truncate',
+        );
+      });
+
+      test('Numeric decimal entity counts as one visible character', () {
+        // &#65; is the letter A
+        expect(
+          sliceHtml('X&#65;Y', 3),
+          equals('X&#65;Y'),
+          reason: 'X(1) &#65;(2) Y(3) = 3 visible chars, no truncation',
+        );
+      });
+
+      test('Hex entity counts as one visible character', () {
+        // &#x41; is the letter A
+        expect(
+          sliceHtml('&#x41;BC', 2),
+          equals('&#x41;B...'),
+          reason: '&#x41;(1) B(2) then truncate before C',
+        );
+      });
+
+      test('Bare ampersand without valid entity is a literal character', () {
+        expect(
+          sliceHtml('A&B', 2),
+          equals('A&...'),
+          reason: 'A(1) &(2) then truncate before B',
+        );
+      });
+
+      test('Entity at truncation boundary', () {
+        expect(
+          sliceHtml('AB&lt;CD', 3),
+          equals('AB&lt;...'),
+          reason: 'A(1) B(2) &lt;(3) then truncate',
+        );
+      });
+
+      test('Multiple entities in text', () {
+        expect(
+          sliceHtml('&lt;&gt;&amp;', 2),
+          equals('&lt;&gt;...'),
+          reason: '&lt;(1) &gt;(2) then truncate before &amp;',
+        );
+      });
+
+      test('Entity inside tag attribute does not affect visible count', () {
+        const input = '<a href="foo&amp;bar">Link</a>';
+        final result = sliceHtml(input, 10);
+        expect(
+          result,
+          equals('<a href="foo&amp;bar">Link</a>'),
+          reason: 'Entities inside tag attributes are not visible text',
+        );
+      });
+    });
+
+    // -----------------------------------------------
+    // Bug fix: Case-insensitive protected tag close (Bug #2)
+    // -----------------------------------------------
+
+    group('case-insensitive protected tag closing', () {
+      test('Protected tag closing is case-insensitive', () {
+        const input = '<Video controls>content</Video><p>Hello</p>';
+        final result = sliceHtml(input, 3);
+        expect(
+          result,
+          equals('<Video controls>content</Video><p>Hel...</p>'),
+          reason: 'Should find </Video> when searching case-insensitively for '
+              'closing of <video>',
+        );
+      });
+
+      test('Mixed case protected tag with nested content', () {
+        const input = '<AUDIO>track</AUDIO><p>Text</p>';
+        final result = sliceHtml(input, 2);
+        expect(
+          result,
+          equals('<AUDIO>track</AUDIO><p>Te...</p>'),
+          reason: '<AUDIO> block should be fully preserved',
+        );
+      });
+    });
+
+    // -----------------------------------------------
+    // Bug fix: HTML comments with > (Bug #3)
+    // -----------------------------------------------
+
+    group('HTML comment handling', () {
+      test('HTML comment containing > does not break parsing', () {
+        const input = '<!-- a > b --><p>Hello</p>';
+        final result = sliceHtml(input, 10);
+        expect(
+          result,
+          equals('<!-- a > b --><p>Hello</p>'),
+          reason: 'Comment should be preserved intact including > inside',
+        );
+      });
+
+      test('HTML comment with multiple > characters', () {
+        const input = '<!-- x > y > z --><p>AB</p>';
+        final result = sliceHtml(input, 10);
+        expect(
+          result,
+          equals('<!-- x > y > z --><p>AB</p>'),
+          reason: 'All > chars inside comment should be ignored',
+        );
+      });
+
+      test('HTML comment with truncation after', () {
+        const input = '<!-- comment --><p>Hello World</p>';
+        final result = sliceHtml(input, 5);
+        expect(
+          result,
+          equals('<!-- comment --><p>Hello...</p>'),
+          reason: 'Comment preserved, then visible text truncated at 5',
+        );
+      });
+
+      test('Unterminated HTML comment stops processing', () {
+        const input = '<!-- no end';
+        final result = sliceHtml(input, 100);
+        expect(
+          result,
+          equals('...'),
+          reason: '_findTagClose returns -1, loop breaks, '
+              'then ellipsis appended since i < html.length',
+        );
+      });
+    });
+
+    // -----------------------------------------------
+    // Bug fix: Tag attributes with > (Bug #4)
+    // -----------------------------------------------
+
+    group('tag attributes containing >', () {
+      test('Double-quoted attribute with >', () {
+        const input = '<div data-value="a > b">Hello</div>';
+        final result = sliceHtml(input, 10);
+        expect(
+          result,
+          equals('<div data-value="a > b">Hello</div>'),
+          reason: '> inside double quotes should not close the tag',
+        );
+      });
+
+      test('Double-quoted attribute with > and truncation', () {
+        const input = '<div data-value="a > b">Hello World</div>';
+        final result = sliceHtml(input, 5);
+        expect(
+          result,
+          equals('<div data-value="a > b">Hello...</div>'),
+          reason: 'Tag parsed correctly despite > in attribute, then truncated',
+        );
+      });
+
+      test('Single-quoted attribute with >', () {
+        const input = "<div data-value='a > b'>Hello</div>";
+        final result = sliceHtml(input, 3);
+        expect(
+          result,
+          equals("<div data-value='a > b'>Hel...</div>"),
+          reason: '> inside single quotes should not close the tag',
+        );
+      });
+    });
+
+    // -----------------------------------------------
+    // Bug fix: CRLF handling (Bug #5)
+    // -----------------------------------------------
+
+    group('CRLF handling', () {
+      test('CRLF is treated as single newline', () {
+        const input = 'Hello\r\nWorld';
+        final result = sliceHtml(input, 10);
+        expect(
+          result,
+          equals('Hello\nWorld'),
+          reason: r'\r\n should produce a single \n in output',
+        );
+      });
+
+      test('CRLF with preserveNewlines false produces single space', () {
+        const input = 'A\r\nB';
+        final result = sliceHtml(input, 10, preserveNewlines: false);
+        expect(
+          result,
+          equals('A B'),
+          reason: r'\r\n should produce a single space, not two',
+        );
+      });
+
+      test('Lone CR is preserved when preserveNewlines is true', () {
+        const input = 'A\rB';
+        final result = sliceHtml(input, 10);
+        expect(
+          result,
+          equals('A\rB'),
+          reason: r'Lone \r should be preserved as-is',
+        );
+      });
+
+      test('Lone CR replaced with space when preserveNewlines is false', () {
+        const input = 'A\rB';
+        final result = sliceHtml(input, 10, preserveNewlines: false);
+        expect(
+          result,
+          equals('A B'),
+          reason: r'Lone \r should become a space',
+        );
+      });
+    });
+
+    // -----------------------------------------------
+    // Improvement: Custom preserveTags (Improvement #6)
+    // -----------------------------------------------
+
+    group('custom preserveTags', () {
+      test('Custom preserveTags set is respected', () {
+        const input = '<code>x = 1</code><p>Hello</p>';
+        final result = sliceHtml(
+          input,
+          3,
+          preserveTags: const {'code'},
+        );
+        expect(
+          result,
+          equals('<code>x = 1</code><p>Hel...</p>'),
+          reason: '<code> should be preserved as whole block',
+        );
+      });
+
+      test('Empty preserveTags means nothing is preserved as block', () {
+        const input = '<video controls>content</video><p>Hi</p>';
+        final result = sliceHtml(
+          input,
+          5,
+          preserveTags: const {},
+        );
+        // <video> is not preserved; its inner text "content" counts
+        expect(
+          result,
+          equals('<video controls>conte...</video>'),
+          reason: 'With empty preserveTags, video content counts toward limit',
+        );
+      });
+
+      test('defaultPreserveTags constant has expected values', () {
+        expect(
+          defaultPreserveTags,
+          equals({'title', 'head', 'img', 'video', 'audio', 'iframe'}),
+        );
+      });
+    });
+
+    // -----------------------------------------------
+    // Improvement: Custom ellipsis (Improvement #7)
+    // -----------------------------------------------
+
+    group('custom ellipsis', () {
+      test('Custom ellipsis string', () {
+        expect(
+          sliceHtml('Hello World', 5, ellipsis: '~'),
+          equals('Hello~'),
+        );
+      });
+
+      test('Empty ellipsis string', () {
+        expect(
+          sliceHtml('Hello World', 5, ellipsis: ''),
+          equals('Hello'),
+        );
+      });
+
+      test('Unicode ellipsis character', () {
+        expect(
+          sliceHtml('Hello World', 5, ellipsis: '\u2026'),
+          equals('Hello\u2026'),
+        );
+      });
+
+      test('Custom preserveTags with custom ellipsis', () {
+        const input = '<video>vid</video><p>Hello World</p>';
+        final result = sliceHtml(
+          input,
+          5,
+          ellipsis: '[...]',
+        );
+        expect(
+          result,
+          equals('<video>vid</video><p>Hello[...]</p>'),
+        );
+      });
+    });
+
+    // -----------------------------------------------
+    // Improvement: Input validation (Improvement #8)
+    // -----------------------------------------------
+
+    group('input validation', () {
+      test('Negative maxLength throws ArgumentError', () {
+        expect(
+          () => sliceHtml('<p>Hello</p>', -1),
+          throwsA(isA<ArgumentError>()),
+        );
+      });
+
+      test('Empty html returns empty string', () {
+        expect(sliceHtml('', 10), equals(''));
+      });
+
+      test('maxLength of zero with plain text', () {
+        expect(
+          sliceHtml('Hello', 0),
+          equals('...'),
+          reason: 'No visible chars allowed, but ellipsis is appended',
+        );
+      });
+
+      test('maxLength of zero returns ellipsis only', () {
+        expect(
+          sliceHtml('<p>Hello</p>', 0),
+          equals('...'),
+          reason: 'With maxLength 0, loop never executes; only ellipsis output',
+        );
+      });
     });
   });
 }
